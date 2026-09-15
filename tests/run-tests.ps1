@@ -1,6 +1,6 @@
 <#
-  Runs the offline tests: JSON bodies, backoff, the report queue and the registration and
-  reporting state machine, without the game. Exit code 0 means every check passed.
+  Runs the offline tests: JSON bodies, backoff, the report queue and the registration, claim and
+  report state machines, without the game. Exit code 0 means every check passed.
   Usage: .\run-tests.ps1
 #>
 param(
@@ -34,7 +34,7 @@ if (-not (Test-Path -LiteralPath $fx)) { $fx = Join-Path $env:WINDIR 'Microsoft.
 $references = 'mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Net.Http.dll' | ForEach-Object { Join-Path $fx $_ }
 
 # Only the sources that do not reference the game or LabAPI.
-$coreFiles = 'ApiClient.cs', 'IReporterHost.cs', 'Json.cs', 'Payloads.cs', 'PluginConfig.cs', 'PluginInfo.cs',
+$coreFiles = 'ApiClient.cs', 'ConsoleCommandParser.cs', 'IReporterHost.cs', 'Json.cs', 'Payloads.cs', 'PluginConfig.cs', 'PluginInfo.cs',
     'ReportQueue.cs', 'Reporter.cs', 'RetryBackoff.cs', 'StoredCredential.cs'
 $sources = @($coreFiles | ForEach-Object { Join-Path $root "src\$_" }) + (Join-Path $here 'Tests.cs')
 

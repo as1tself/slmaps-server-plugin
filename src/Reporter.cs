@@ -18,8 +18,18 @@ namespace SlmapsServerPlugin
             Stopped,
         }
 
+        private enum ClaimState
+        {
+            None,
+            Claiming,
+            Review,
+        }
+
         private const int MaxTokenLength = 128;
         private const int MaxResultsPerTick = 64;
+        private const int MinClaimRetrySeconds = 30;
+        private const int MaxClaimRetrySeconds = 600;
+        private const int ShownCodeLength = 12;
 
         private readonly IReporterHost _host;
         private readonly IApiTransport _transport;
@@ -29,7 +39,15 @@ namespace SlmapsServerPlugin
         private readonly ReportQueue _queue = new ReportQueue(ReportQueue.DefaultCapacity);
         private readonly RetryBackoff _registerBackoff = new RetryBackoff();
         private readonly RetryBackoff _reportBackoff = new RetryBackoff();
+        private readonly RetryBackoff _claimBackoff = new RetryBackoff();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+
+        private ClaimState _claimState = ClaimState.None;
+        private string _claimCode;
+        private bool _claimFromConfig;
+        private string _finishedClaimCode;
+        private double _nextClaimAt;
+        private string _serverId;
 
         private State _state = State.Idle;
         private int _generation;
@@ -81,6 +99,52 @@ namespace SlmapsServerPlugin
             get { return _seed; }
         }
 
+        internal string ClaimStateName
+        {
+            get { return _claimState.ToString(); }
+        }
+
+        public bool StartClaim(string code, out string message)
+        {
+            string trimmed = (code ?? "").Trim();
+            if (_state == State.Stopped)
+            {
+                message = "The slmaps plugin is not running.";
+                return false;
+            }
+            if (trimmed.Length == 0 || trimmed.Length > MaxTokenLength)
+            {
+                message = "Usage: slmaps claim <code>  (get the code with /server claim in the slmaps Discord)";
+                return false;
+            }
+            BeginClaim(trimmed, false);
+            message = "Claiming this server with code " + ShortCode(trimmed) + ". Watch this console for the result.";
+            return true;
+        }
+
+        public string DescribeStatus()
+        {
+            string claim;
+            switch (_claimState)
+            {
+                case ClaimState.Claiming:
+                    claim = "in progress (code " + ShortCode(_claimCode) + ")";
+                    break;
+                case ClaimState.Review:
+                    claim = "waiting for manual review by slmaps staff (code " + ShortCode(_claimCode) + ")";
+                    break;
+                default:
+                    claim = "none";
+                    break;
+            }
+            return PluginInfo.Name + " " + PluginInfo.Version
+                + "\nstate: " + _state
+                + "\nserverId: " + (string.IsNullOrEmpty(_serverId) ? "-" : _serverId)
+                + "\nclaim: " + claim
+                + "\ncurrent seed: " + (_seed > 0 ? _seed.ToString() : "-")
+                + "\napi_base_url: " + (Cfg().ApiBaseUrl ?? "");
+        }
+
         public void Start()
         {
             ResolveRegistration();
@@ -109,7 +173,6 @@ namespace SlmapsServerPlugin
         {
             Interlocked.Exchange(ref _reloadPending, 1);
         }
-
 
         public void OnMapGenerated(int seed)
         {
@@ -147,7 +210,6 @@ namespace SlmapsServerPlugin
             EnqueueRoundEvent(ReportEvents.RoundEnd);
         }
 
-
         public void Tick()
         {
             if (_state == State.Stopped)
@@ -182,7 +244,11 @@ namespace SlmapsServerPlugin
             {
                 return;
             }
-            if (_state == State.Registering && now >= _nextRegisterAt)
+            if (_claimState != ClaimState.None && now >= _nextClaimAt)
+            {
+                SendClaim();
+            }
+            else if (_state == State.Registering && now >= _nextRegisterAt)
             {
                 SendRegister();
             }
@@ -192,13 +258,19 @@ namespace SlmapsServerPlugin
             }
         }
 
-
         private void ResolveRegistration()
         {
+            StartConfigClaimIfNew();
+            bool claiming = _claimState != ClaimState.None;
             string token = CurrentToken();
 
             if (_state == State.Revoked)
             {
+                if (claiming)
+                {
+                    _host.Info("Reporting stays stopped until the Discord claim finishes.");
+                    return;
+                }
                 if (token.Length > 0)
                 {
                     BeginRegistering();
@@ -212,8 +284,8 @@ namespace SlmapsServerPlugin
                 }
                 else
                 {
-                    _host.Warn("Reporting is still stopped because the credential was revoked. Request a new registration token from the slmaps admin, delete "
-                        + _host.CredentialFilePath + ", set registration_token and run `labapi reload configs`.");
+                    _host.Warn("Reporting is still stopped because the credential was rejected. Get a new code with /server claim in the slmaps Discord and run `slmaps claim <code>`, "
+                        + "or request a new registration token from the slmaps admin, delete " + _host.CredentialFilePath + ", set registration_token and run `labapi reload configs`.");
                 }
                 return;
             }
@@ -226,7 +298,18 @@ namespace SlmapsServerPlugin
                     _host.Info("credential.yml already exists, so registration_token is not used.");
                 }
                 _host.Info("Using the stored credential (serverId " + stored.ServerId + ").");
+                _serverId = stored.ServerId;
                 UseCredential(stored.Credential);
+                return;
+            }
+
+            if (claiming)
+            {
+                if (token.Length > 0)
+                {
+                    _host.Info("claim_code takes priority, so registration_token is not used while the claim runs.");
+                }
+                _state = State.Idle;
                 return;
             }
 
@@ -243,6 +326,7 @@ namespace SlmapsServerPlugin
         {
             _urlErrorLogged = false;
             _host.Debug("Configuration reloaded.");
+            StartConfigClaimIfNew();
             if (_state == State.Registered || _state == State.Stopped)
             {
                 return;
@@ -265,8 +349,9 @@ namespace SlmapsServerPlugin
         {
             _state = State.Idle;
             _queue.Clear();
-            _host.Warn("Not registered with slmaps: there is no credential.yml and registration_token is empty. "
-                + "Ask the slmaps admin for a registration token, put it into registration_token in " + _host.ConfigFilePath
+            _host.Warn("Not registered with slmaps: there is no credential.yml, claim_code is empty and registration_token is empty. "
+                + "Run /server claim in the slmaps Discord and then `slmaps claim <code>` in this console, "
+                + "or ask the slmaps admin for a registration token, put it into registration_token in " + _host.ConfigFilePath
                 + " and run `labapi reload configs` (or restart the server).");
         }
 
@@ -323,6 +408,7 @@ namespace SlmapsServerPlugin
                 }
                 _host.ClearRegistrationToken(usedToken);
                 _host.Info("Registered with slmaps (serverId " + serverId + "). The credential was saved to credential.yml and registration_token was cleared.");
+                _serverId = serverId;
                 UseCredential(credential);
                 return;
             }
@@ -364,7 +450,6 @@ namespace SlmapsServerPlugin
                 EnqueueRoundEvent(ReportEvents.RoundStart);
             }
         }
-
 
         private void EnqueueRoundEvent(string eventName)
         {
@@ -457,10 +542,12 @@ namespace SlmapsServerPlugin
                 _credential = null;
                 _state = State.Revoked;
                 _queue.Clear();
-                _host.Error("slmaps rejected the server credential (HTTP 401): it was revoked or no longer exists. Reporting has stopped. "
-                    + "Request a new registration token from the slmaps admin and delete " + _host.CredentialFilePath
+                _host.Error("slmaps rejected the server credential (HTTP 401): it was revoked, replaced by a newer claim, "
+                    + "or the report came from an IP other than the verified one. Reporting has stopped. "
+                    + "Get a new code with /server claim in the slmaps Discord and run `slmaps claim <code>`, "
+                    + "or request a new registration token from the slmaps admin and delete " + _host.CredentialFilePath
                     + ", then set registration_token and run `labapi reload configs`.");
-                if (CurrentToken().Length > 0)
+                if (_claimState == ClaimState.None && CurrentToken().Length > 0)
                 {
                     BeginRegistering();
                 }
@@ -480,6 +567,175 @@ namespace SlmapsServerPlugin
                 + (kept ? "retrying in " : "dropped as stale; next report in ") + delay + "s." + RedirectHint(r));
         }
 
+        private void StartConfigClaimIfNew()
+        {
+            string code = CurrentClaimCode();
+            if (code.Length == 0
+                || string.Equals(code, _claimCode, StringComparison.Ordinal)
+                || string.Equals(code, _finishedClaimCode, StringComparison.Ordinal))
+            {
+                return;
+            }
+            if (code.Length > MaxTokenLength)
+            {
+                _finishedClaimCode = code;
+                _host.Error("claim_code is longer than " + MaxTokenLength + " characters. Paste the code exactly as the Discord bot sent it.");
+                return;
+            }
+            BeginClaim(code, true);
+        }
+
+        private void BeginClaim(string code, bool fromConfig)
+        {
+            _claimCode = code;
+            _claimFromConfig = fromConfig;
+            _claimState = ClaimState.Claiming;
+            _claimBackoff.Reset();
+            _nextClaimAt = 0;
+            _host.Info("Claiming this server with a slmaps Discord code (" + ShortCode(code) + ").");
+        }
+
+        private void SendClaim()
+        {
+            string code = _claimCode;
+            if (string.IsNullOrEmpty(code))
+            {
+                _claimState = ClaimState.None;
+                return;
+            }
+            string url;
+            if (!TryBuildUrl(PluginInfo.ClaimPath, out url))
+            {
+                _nextClaimAt = _now() + MinClaimRetrySeconds;
+                return;
+            }
+            int port = _host.Port;
+            string json = Payloads.BuildClaim(code, port, PluginInfo.Version, _host.GameVersion, _host.LabApiVersion);
+            _host.Debug("POST " + PluginInfo.ClaimPath + " (port " + port + ").");
+            Send(url, json, null, r => OnClaimResult(r, code));
+        }
+
+        private void OnClaimResult(ApiResult r, string code)
+        {
+            if (r.HasResponse && r.StatusCode == 200)
+            {
+                // The code is used up the moment this succeeds, so the credential is always saved.
+                string credential = r.GetString("credential");
+                string serverId = r.GetString("serverId") ?? "";
+                string issuedAt = r.GetString("issuedAt") ?? "";
+                bool wasConfig = _claimFromConfig && string.Equals(code, _claimCode, StringComparison.Ordinal);
+                if (string.IsNullOrEmpty(credential))
+                {
+                    FailClaim(code, "slmaps accepted the claim (HTTP 200) but returned no credential. The code is used up; run /server claim again.");
+                    return;
+                }
+                StoredCredential stored = new StoredCredential { ServerId = serverId, Credential = credential, IssuedAt = issuedAt };
+                if (!_host.SaveCredential(stored))
+                {
+                    _host.Error("Claimed, but " + _host.CredentialFilePath + " could not be written. Reporting works until the server restarts; "
+                        + "fix the file permissions and claim again afterwards.");
+                }
+                if (wasConfig)
+                {
+                    _host.ClearClaimCode(code);
+                }
+                FinishClaim(code);
+                _host.Info("slmaps verified this server (serverId " + serverId + "). The credential was saved to credential.yml"
+                    + (wasConfig ? " and claim_code was cleared." : "."));
+                _serverId = serverId;
+                UseCredential(credential);
+                return;
+            }
+
+            if (!string.Equals(code, _claimCode, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            int timeout = CurrentTimeout();
+            if (r.HasResponse && r.StatusCode == 202)
+            {
+                string reason = r.GetString("reason");
+                int retry = (int)Math.Round(r.GetNumber("retryAfterSeconds", 60));
+                retry = Math.Max(MinClaimRetrySeconds, Math.Min(MaxClaimRetrySeconds, retry));
+                if (_claimState != ClaimState.Review)
+                {
+                    _host.Info("slmaps staff must review this claim manually (" + ReasonText(reason) + "). "
+                        + "Keep the server running; the plugin checks again every " + retry + "s and you will be notified on Discord.");
+                }
+                else
+                {
+                    _host.Debug("Claim still under review; checking again in " + retry + "s.");
+                }
+                _claimState = ClaimState.Review;
+                _claimBackoff.Reset();
+                _nextClaimAt = _now() + retry;
+                return;
+            }
+            if (r.HasResponse && r.StatusCode == 401)
+            {
+                FailClaim(code, "slmaps rejected the claim code (HTTP 401): it is invalid, expired, already used or cancelled. "
+                    + "Run /server claim in the slmaps Discord to get a new code.");
+                return;
+            }
+            if (r.HasResponse && r.StatusCode == 403)
+            {
+                FailClaim(code, "slmaps staff rejected this claim (HTTP 403). The reason was sent to you on Discord.");
+                return;
+            }
+            if (r.HasResponse && r.StatusCode == 400)
+            {
+                FailClaim(code, "slmaps rejected the claim request as invalid (" + r.Describe(timeout) + "). Check the code and try again.");
+                return;
+            }
+
+            int delay = _claimBackoff.NextDelaySeconds();
+            _nextClaimAt = _now() + delay;
+            _host.Warn("Claim request failed (" + r.Describe(timeout) + "); retrying in " + delay + "s." + RedirectHint(r));
+        }
+
+        private void FinishClaim(string code)
+        {
+            _finishedClaimCode = code;
+            if (string.Equals(code, _claimCode, StringComparison.Ordinal))
+            {
+                _claimCode = null;
+                _claimState = ClaimState.None;
+            }
+        }
+
+        private void FailClaim(string code, string message)
+        {
+            _host.Error(message);
+            FinishClaim(code);
+            if (_state != State.Registered && _state != State.Stopped)
+            {
+                ResolveRegistration();
+            }
+        }
+
+        private static string ReasonText(string reason)
+        {
+            switch (reason)
+            {
+                case "ip_mismatch":
+                    return "this server's IP differs from the address given on Discord";
+                case "port_mismatch":
+                    return "this server's port differs from the address given on Discord";
+                default:
+                    return string.IsNullOrEmpty(reason) ? "no reason given" : reason;
+            }
+        }
+
+        // Only the first characters of a code ever reach a log line.
+        private static string ShortCode(string code)
+        {
+            if (string.IsNullOrEmpty(code))
+            {
+                return "-";
+            }
+            return code.Length <= ShownCodeLength ? code : code.Substring(0, ShownCodeLength) + "...";
+        }
 
         private void Send(string url, string json, string bearer, Action<ApiResult> onResult)
         {
@@ -570,6 +826,11 @@ namespace SlmapsServerPlugin
         private string CurrentToken()
         {
             return (Cfg().RegistrationToken ?? "").Trim();
+        }
+
+        private string CurrentClaimCode()
+        {
+            return (Cfg().ClaimCode ?? "").Trim();
         }
 
         private int CurrentTimeout()

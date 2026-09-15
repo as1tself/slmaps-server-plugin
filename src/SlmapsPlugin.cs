@@ -18,13 +18,14 @@ namespace SlmapsServerPlugin
 {
     public sealed class SlmapsPlugin : Plugin<PluginConfig>
     {
-        // An idle server ticks about once per second, so the real interval can be longer than this.
         private const float TickIntervalSeconds = 0.5f;
 
         private static readonly Stopwatch Clock = Stopwatch.StartNew();
 
         private Reporter _reporter;
         private LabApiHost _host;
+
+        internal static Reporter ActiveReporter { get; private set; }
         private CoroutineHandle _tickHandle;
         private bool _subscribed;
 
@@ -53,6 +54,7 @@ namespace SlmapsServerPlugin
                     MonotonicSeconds,
                     UtcNow);
                 _reporter = reporter;
+                ActiveReporter = reporter;
 
                 ServerEvents.MapGenerated += OnMapGenerated;
                 ServerEvents.RoundStarted += OnRoundStarted;
@@ -97,6 +99,7 @@ namespace SlmapsServerPlugin
 
             Reporter reporter = _reporter;
             _reporter = null;
+            ActiveReporter = null;
             if (reporter != null)
             {
                 try

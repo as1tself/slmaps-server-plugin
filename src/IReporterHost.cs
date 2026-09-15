@@ -23,6 +23,8 @@ namespace SlmapsServerPlugin
 
         void ClearRegistrationToken(string usedToken);
 
+        void ClearClaimCode(string usedCode);
+
         void Debug(string message);
 
         void Info(string message);

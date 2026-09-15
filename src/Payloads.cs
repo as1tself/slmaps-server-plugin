@@ -20,6 +20,17 @@ namespace SlmapsServerPlugin
             return w.ToString();
         }
 
+        public static string BuildClaim(string code, int port, string pluginVersion, string gameVersion, string labApiVersion)
+        {
+            JsonObjectBuilder w = new JsonObjectBuilder();
+            w.Add("code", code);
+            w.Add("port", port);
+            AddOptionalShort(w, "pluginVersion", pluginVersion);
+            AddOptionalShort(w, "gameVersion", gameVersion);
+            AddOptionalShort(w, "labApiVersion", labApiVersion);
+            return w.ToString();
+        }
+
         public static string BuildReport(ReportSnapshot s, bool sendRoundId, bool sendRoundStartTime, bool sendElapsedTime, string pluginVersion)
         {
             JsonObjectBuilder w = new JsonObjectBuilder();

@@ -24,6 +24,10 @@ namespace SlmapsServerPlugin.Tests
             Run("Reporter: register + report flow", TestReporterFlow);
             Run("Reporter: register 401 waits for reload", TestRegisterRejected);
             Run("Reporter: stop ignores late results", TestStopIgnoresLateResult);
+            Run("Reporter: claim_code verified replaces credential", TestClaimVerified);
+            Run("Reporter: console claim waits for review then verifies", TestClaimReview);
+            Run("Reporter: claim 401/403 stop", TestClaimRejected);
+            Run("ConsoleCommandParser", TestCommandParser);
             Run("HttpApiTransport against a loopback listener", TestHttpTransport);
 
             if (Failures.Count == 0)
@@ -248,6 +252,15 @@ namespace SlmapsServerPlugin.Tests
                 }
             }
 
+            public void ClearClaimCode(string usedCode)
+            {
+                if (Cfg.ClaimCode.Trim() == usedCode)
+                {
+                    Cfg.ClaimCode = "";
+                    SaveConfigCalls++;
+                }
+            }
+
             public void Debug(string message) { Logs.Add("DEBUG " + message); }
             public void Info(string message) { Logs.Add("INFO " + message); }
             public void Warn(string message) { Logs.Add("WARN " + message); }
@@ -461,6 +474,134 @@ namespace SlmapsServerPlugin.Tests
             r.NotifyConfigReloaded();
             Pump(r);
             Equal("Idle", r.StateName, "token removed -> idle");
+        }
+
+        private static void TestClaimVerified()
+        {
+            const string code = "slclm_SECRET_CLAIM_CODE_1";
+            FakeHost host = new FakeHost();
+            host.Stored = new StoredCredential { ServerId = "old", Credential = "slsrv_OLD_CREDENTIAL", IssuedAt = "" };
+            host.Cfg.ClaimCode = " " + code + " ";
+            host.Cfg.RegistrationToken = "slreg_IGNORED_TOKEN";
+            FakeTransport transport = new FakeTransport();
+            double now = 0;
+            Reporter r = new Reporter(host, transport, () => now, () => DateTime.UtcNow);
+            transport.Script.Enqueue(() => Http(200, "{\"status\":\"verified\",\"serverId\":\"srv-claim\",\"credential\":\"slsrv_NEW_CLAIM_CREDENTIAL\",\"issuedAt\":\"2026-09-15T10:00:00Z\"}"));
+            r.Start();
+            Equal("Registered", r.StateName, "old credential keeps reporting while claiming");
+            Equal("Claiming", r.ClaimStateName, "claim started from config");
+            Pump(r);
+            Request claim = transport.Requests[0];
+            Check(claim.Url == "https://slmaps.com/api/plugin/v1/claim", "claim url");
+            Check(claim.Bearer == null, "claim has no bearer");
+            Check(claim.Json.StartsWith("{\"code\":\"" + code + "\",\"port\":7777,\"pluginVersion\":\"1.1.0\"", StringComparison.Ordinal), "claim body (trimmed code, port, version)");
+            Equal("None", r.ClaimStateName, "claim finished");
+            Check(host.Stored != null && host.Stored.Credential == "slsrv_NEW_CLAIM_CREDENTIAL" && host.Stored.ServerId == "srv-claim", "credential replaced");
+            Equal("", host.Cfg.ClaimCode, "claim_code cleared");
+            Equal("slreg_IGNORED_TOKEN", host.Cfg.RegistrationToken, "registration_token untouched");
+
+            r.OnMapGenerated(555);
+            Pump(r);
+            Request report = transport.Requests[transport.Requests.Count - 1];
+            Check(report.Url.EndsWith("/report", StringComparison.Ordinal) && report.Bearer == "slsrv_NEW_CLAIM_CREDENTIAL", "reports use the claimed credential");
+
+            int count = transport.Requests.Count;
+            r.NotifyConfigReloaded();
+            now += 1000;
+            Pump(r);
+            Check(!transport.Requests.Exists(x => x.Url.EndsWith("/claim", StringComparison.Ordinal) && transport.Requests.IndexOf(x) >= count), "reload does not re-claim a finished code");
+            Check(r.DescribeStatus().Contains("serverId: srv-claim"), "status shows the claimed server id");
+            foreach (string line in host.Logs)
+            {
+                Check(line.IndexOf("SECRET_CLAIM_CODE", StringComparison.Ordinal) < 0 && line.IndexOf("NEW_CLAIM_CREDENTIAL", StringComparison.Ordinal) < 0,
+                    "log line leaks no claim code/credential: " + line);
+            }
+        }
+
+        private static void TestClaimReview()
+        {
+            const string code = "slclm_CONSOLE_CODE_2";
+            FakeHost host = new FakeHost();
+            FakeTransport transport = new FakeTransport();
+            double now = 0;
+            Reporter r = new Reporter(host, transport, () => now, () => DateTime.UtcNow);
+            r.Start();
+            Equal("Idle", r.StateName, "idle before claim");
+            string message;
+            Check(!r.StartClaim("   ", out message) && message.StartsWith("Usage", StringComparison.Ordinal), "empty console code rejected");
+            Check(r.StartClaim(code, out message) && message.Contains("slclm_CONSOL...") && !message.Contains(code), "console claim accepted without echoing the full code");
+
+            transport.Script.Enqueue(() => Http(202, "{\"status\":\"review\",\"reason\":\"ip_mismatch\",\"retryAfterSeconds\":60}"));
+            Pump(r);
+            Equal(1, transport.Requests.Count, "first claim sent");
+            Equal("Review", r.ClaimStateName, "review after 202");
+            Check(host.HasLog("INFO", "differs from the address given on Discord"), "review reason explained");
+            Check(r.DescribeStatus().Contains("waiting for manual review"), "status shows review");
+
+            now += 59;
+            Pump(r);
+            Equal(1, transport.Requests.Count, "no poll before retryAfterSeconds");
+            transport.Script.Enqueue(() => Http(202, "{\"status\":\"review\",\"reason\":\"ip_mismatch\",\"retryAfterSeconds\":5}"));
+            now += 1;
+            Pump(r);
+            Equal(2, transport.Requests.Count, "polled after 60s");
+            Check(transport.Requests[1].Json.Contains("\"code\":\"" + code + "\""), "poll resends the same code");
+
+            transport.Script.Enqueue(() => Http(200, "{\"status\":\"verified\",\"serverId\":\"srv-r\",\"credential\":\"slsrv_REVIEWED\",\"issuedAt\":\"\"}"));
+            now += 29;
+            Pump(r);
+            Equal(2, transport.Requests.Count, "retryAfterSeconds clamped to at least 30");
+            now += 1;
+            Pump(r);
+            Pump(r);
+            Equal("Registered", r.StateName, "registered after approval");
+            Equal("None", r.ClaimStateName, "claim finished after approval");
+            Equal(0, host.SaveConfigCalls, "console claim does not rewrite config.yml");
+        }
+
+        private static void TestClaimRejected()
+        {
+            FakeHost host = new FakeHost();
+            host.Cfg.ClaimCode = "slclm_BAD";
+            FakeTransport transport = new FakeTransport();
+            double now = 0;
+            Reporter r = new Reporter(host, transport, () => now, () => DateTime.UtcNow);
+            transport.Script.Enqueue(() => Http(401, "{\"error\":\"invalid code\"}"));
+            r.Start();
+            Pump(r);
+            Equal("None", r.ClaimStateName, "claim stopped after 401");
+            Check(host.HasLog("ERROR", "/server claim"), "401 tells the owner to get a new code");
+            Check(host.HasLog("WARN", "registration_token is empty"), "falls back to the idle guidance");
+            now += 10000;
+            Pump(r);
+            Equal(1, transport.Requests.Count, "no retry after 401");
+            r.NotifyConfigReloaded();
+            Pump(r);
+            Equal(1, transport.Requests.Count, "reload does not retry the same rejected code");
+
+            string message;
+            transport.Script.Enqueue(() => Http(403, "{\"error\":\"claim rejected\"}"));
+            r.StartClaim("slclm_OTHER", out message);
+            Pump(r);
+            Equal("None", r.ClaimStateName, "claim stopped after 403");
+            Check(host.HasLog("ERROR", "rejected this claim"), "403 explained");
+
+            transport.Script.Enqueue(() => Http(503, "{\"error\":\"db unavailable\"}"));
+            r.StartClaim("slclm_THIRD", out message);
+            Pump(r);
+            Equal("Claiming", r.ClaimStateName, "503 keeps claiming");
+            Check(host.HasLog("WARN", "Claim request failed"), "503 retried with backoff");
+        }
+
+        private static void TestCommandParser()
+        {
+            string code;
+            Equal(ConsoleCommandParser.Action.Usage, ConsoleCommandParser.Parse(new string[0], out code), "no args -> usage");
+            Equal(ConsoleCommandParser.Action.Status, ConsoleCommandParser.Parse(new[] { "STATUS" }, out code), "status (case-insensitive)");
+            Equal(ConsoleCommandParser.Action.Usage, ConsoleCommandParser.Parse(new[] { "claim" }, out code), "claim without code -> usage");
+            Equal(ConsoleCommandParser.Action.Claim, ConsoleCommandParser.Parse(new[] { "claim", " slclm_abc " }, out code), "claim with code");
+            Equal("slclm_abc", code, "claim code trimmed");
+            Equal(ConsoleCommandParser.Action.Usage, ConsoleCommandParser.Parse(new[] { "register", "x" }, out code), "unknown subcommand -> usage");
         }
 
         private static void TestStopIgnoresLateResult()

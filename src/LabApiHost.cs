@@ -128,6 +128,28 @@ namespace SlmapsServerPlugin
             }
         }
 
+        public void ClearClaimCode(string usedCode)
+        {
+            try
+            {
+                PluginConfig config = _plugin.Config;
+                if (config == null)
+                {
+                    return;
+                }
+                if (!string.Equals((config.ClaimCode ?? "").Trim(), usedCode, StringComparison.Ordinal))
+                {
+                    return; // The owner put a different code in while the request was running.
+                }
+                config.ClaimCode = "";
+                _plugin.SaveConfig();
+            }
+            catch (Exception ex)
+            {
+                Warn("Could not clear claim_code in config.yml (" + ex.GetType().Name + "). Remove it by hand; it is already used up.");
+            }
+        }
+
         public void Debug(string message)
         {
             PluginConfig config = _plugin.Config;

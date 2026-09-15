@@ -52,6 +52,16 @@ namespace SlmapsServerPlugin
             return null;
         }
 
+        public double GetNumber(string name, double fallback)
+        {
+            object value;
+            if (Body != null && Body.TryGetValue(name, out value) && value is double)
+            {
+                return (double)value;
+            }
+            return fallback;
+        }
+
         // Goes into logs, so it stays free of credentials.
         public string Describe(int timeoutSeconds)
         {

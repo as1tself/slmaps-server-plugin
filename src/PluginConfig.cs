@@ -15,6 +15,9 @@ namespace SlmapsServerPlugin
         [Description("One-time registration token issued by the slmaps admin. It is cleared automatically after a successful registration. Not used while a working credential.yml exists.")]
         public string RegistrationToken { get; set; } = "";
 
+        [Description("One-time server claim code from the slmaps Discord bot (/server claim). Takes priority over registration_token and replaces an existing credential once verified. Cleared automatically when the claim finishes. You can also run `slmaps claim <code>` in the server console instead of editing this file.")]
+        public string ClaimCode { get; set; } = "";
+
         [Description("Seconds between periodic reports of the current seed. 0 disables periodic reports; values from 1 to 9 are treated as 10.")]
         public int ReportIntervalSeconds { get; set; } = 60;
 

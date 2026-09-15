@@ -45,7 +45,7 @@ if (-not (Test-Path -LiteralPath $CscDll)) { throw "csc.dll not found: $CscDll" 
 $references = @(
     'mscorlib.dll', 'System.dll', 'System.Core.dll', 'netstandard.dll', 'System.Net.Http.dll',
     'LabApi.dll', 'Assembly-CSharp.dll', 'Assembly-CSharp-firstpass.dll', 'UnityEngine.CoreModule.dll',
-    'Mirror.dll', 'NorthwoodLib.dll', 'YamlDotNet.dll'
+    'Mirror.dll', 'NorthwoodLib.dll', 'YamlDotNet.dll', 'CommandSystem.Core.dll'
 )
 foreach ($r in $references) {
     if (-not (Test-Path -LiteralPath (Join-Path $ManagedDir $r))) { throw "Missing reference: $(Join-Path $ManagedDir $r)" }

@@ -91,6 +91,8 @@ namespace SlmapsServerPlugin
     internal interface IApiTransport
     {
         Task<ApiResult> PostJsonAsync(string url, string json, string bearerToken, int timeoutSeconds, CancellationToken cancellationToken);
+
+        Task<ApiResult> GetJsonAsync(string url, int timeoutSeconds, CancellationToken cancellationToken);
     }
 
     // HttpClient.Timeout cannot be changed after the first request, so it stays infinite and each request times out through its own token.
@@ -123,7 +125,17 @@ namespace SlmapsServerPlugin
             }
         }
 
-        public async Task<ApiResult> PostJsonAsync(string url, string json, string bearerToken, int timeoutSeconds, CancellationToken cancellationToken)
+        public Task<ApiResult> PostJsonAsync(string url, string json, string bearerToken, int timeoutSeconds, CancellationToken cancellationToken)
+        {
+            return SendAsync(HttpMethod.Post, url, json, bearerToken, timeoutSeconds, cancellationToken);
+        }
+
+        public Task<ApiResult> GetJsonAsync(string url, int timeoutSeconds, CancellationToken cancellationToken)
+        {
+            return SendAsync(HttpMethod.Get, url, null, null, timeoutSeconds, cancellationToken);
+        }
+
+        private async Task<ApiResult> SendAsync(HttpMethod method, string url, string json, string bearerToken, int timeoutSeconds, CancellationToken cancellationToken)
         {
             CancellationTokenSource timeout = null;
             CancellationTokenSource linked = null;
@@ -132,8 +144,11 @@ namespace SlmapsServerPlugin
             {
                 timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
                 linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-                request = new HttpRequestMessage(HttpMethod.Post, url);
-                request.Content = new StringContent(json, new UTF8Encoding(false), "application/json");
+                request = new HttpRequestMessage(method, url);
+                if (json != null)
+                {
+                    request.Content = new StringContent(json, new UTF8Encoding(false), "application/json");
+                }
                 request.Headers.ExpectContinue = false;
                 request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
                 request.Headers.TryAddWithoutValidation("Accept", "application/json");

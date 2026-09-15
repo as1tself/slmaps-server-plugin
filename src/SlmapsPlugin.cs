@@ -18,7 +18,7 @@ namespace SlmapsServerPlugin
 {
     public sealed class SlmapsPlugin : Plugin<PluginConfig>
     {
-        private const float TickIntervalSeconds = 0.5f;
+        private const double TickIntervalSeconds = 0.5;
 
         private static readonly Stopwatch Clock = Stopwatch.StartNew();
 
@@ -124,19 +124,26 @@ namespace SlmapsServerPlugin
             }
         }
 
+        // Timing.WaitForSeconds counts scaled game time, which an idle server slows to a crawl, so the interval is measured on a Stopwatch.
         private IEnumerator<float> TickLoop(Reporter reporter)
         {
+            double nextTickAt = 0;
             while (true)
             {
-                try
+                double now = MonotonicSeconds();
+                if (now >= nextTickAt)
                 {
-                    reporter.Tick();
+                    nextTickAt = now + TickIntervalSeconds;
+                    try
+                    {
+                        reporter.Tick();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(PluginInfo.LogPrefix + "Tick failed: " + ex.GetType().Name + ": " + ex.Message);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Logger.Error(PluginInfo.LogPrefix + "Tick failed: " + ex.GetType().Name + ": " + ex.Message);
-                }
-                yield return Timing.WaitForSeconds(TickIntervalSeconds);
+                yield return Timing.WaitForOneFrame;
             }
         }
 

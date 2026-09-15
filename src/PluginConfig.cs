@@ -9,13 +9,13 @@ namespace SlmapsServerPlugin
         public const int MinRequestTimeoutSeconds = 3;
         public const int MaxRequestTimeoutSeconds = 60;
 
-        [Description("slmaps API base URL. Keep the default unless the slmaps admin tells you otherwise.")]
+        [Description("slmaps API base URL. Keep the default unless slmaps staff tell you otherwise.")]
         public string ApiBaseUrl { get; set; } = "https://slmaps.com";
 
-        [Description("One-time registration token issued by the slmaps admin. It is cleared automatically after a successful registration. Not used while a working credential.yml exists.")]
+        [Description("One-time registration token issued by slmaps staff. It is cleared after a successful registration and is not used while credential.yml exists.")]
         public string RegistrationToken { get; set; } = "";
 
-        [Description("One-time server claim code from the slmaps Discord bot (/server claim). Takes priority over registration_token and replaces an existing credential once verified. Cleared automatically when the claim finishes. You can also run `slmaps claim <code>` in the server console instead of editing this file.")]
+        [Description("One-time claim code from /server claim in the slmaps Discord: the value starting with slclm_, not the request number. It takes priority over registration_token, replaces an existing credential once verified, and is cleared when the claim finishes. You can run slmaps claim <code> in the server console instead.")]
         public string ClaimCode { get; set; } = "";
 
         [Description("Seconds between periodic reports of the current seed. 0 disables periodic reports; values from 1 to 9 are treated as 10.")]
@@ -35,6 +35,9 @@ namespace SlmapsServerPlugin
 
         [Description("Print verbose debug logs. Tokens and credentials are never printed.")]
         public bool Debug { get; set; } = false;
+
+        [Description("Warn once in the console when slmaps reports a newer plugin release. Turning this off hides only that warning: the version check still runs every 12 hours, and a version below the minimum slmaps accepts still pauses registration, claims and reports.")]
+        public bool CheckForUpdates { get; set; } = true;
 
         public static int EffectiveReportInterval(int configured)
         {

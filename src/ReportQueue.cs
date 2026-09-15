@@ -20,6 +20,7 @@ namespace SlmapsServerPlugin
         public DateTime? RoundStartedAtUtc;
         public double? ElapsedSeconds;
         public double CreatedAt;
+        public bool Manual;
     }
 
     // Round events keep their order under a capacity cap; periodic has a single slot that a newer seed replaces.
@@ -66,12 +67,24 @@ namespace SlmapsServerPlugin
 
         public void SetPeriodic(ReportSnapshot item)
         {
+            if (_periodic != null && _periodic.Manual)
+            {
+                item.Manual = true;
+            }
             _periodic = item;
         }
 
         public void DropPeriodic()
         {
             _periodic = null;
+        }
+
+        public void DropAutomaticPeriodic()
+        {
+            if (_periodic != null && !_periodic.Manual)
+            {
+                _periodic = null;
+            }
         }
 
         public void Clear()
@@ -92,7 +105,7 @@ namespace SlmapsServerPlugin
             {
                 ReportSnapshot p = _periodic;
                 _periodic = null;
-                if (!periodicEnabled || p.Seed != currentSeed)
+                if ((!periodicEnabled && !p.Manual) || p.Seed != currentSeed)
                 {
                     return null;
                 }

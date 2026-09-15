@@ -31,7 +31,9 @@ SCP: Secret Laboratory 서버의 현재 맵 시드를 slmaps.com에 알려서, �
 3. 요청이 들어온 IP와 포트가 적은 주소와 같으면 바로 등록되고 콘솔에 `slmaps verified this server (serverId ...)`가 나옵니다. 다르면 운영진이 직접 확인하며, 서버를 켜 둔 채 기다리면 플러그인이 1분마다 다시 물어보고 승인되는 대로 등록됩니다.
 4. `/server list`로 내 서버와 진행 중인 인증을 보고, `/server cancel`이나 `/server revoke`로 취소하거나 등록을 폐기할 수 있습니다.
 
-코드는 봇 메시지의 코드 칸에 있는 값이고 항상 `slclm_`로 시작합니다. 따옴표나 꺾쇠로 감싸지 말고 코드만 넣으세요.
+코드는 봇 메시지의 코드 칸에 있는 값이고 항상 `slclm_`로 시작합니다. `요청 #19` 같은 요청 번호는 코드가 아닙니다. 따옴표나 꺾쇠로 감싸지 말고 코드만 넣으세요. 형식이 틀린 값은 slmaps로 보내지 않고 콘솔에서 바로 이유를 알려 줍니다.
+
+인증이 진행 중일 때 다른 코드를 넣으면 새 코드가 이전 코드를 대신하고, 이전 코드는 다시 보내지 않습니다. 진행 중인 인증을 멈추려면 콘솔에서 `slmaps cancel`을 실행하고, 디스코드의 요청까지 없애려면 `/server cancel`도 같이 쓰세요.
 
 등록 뒤 보고는 인증된 IP에서 온 것만 받습니다. 서버 IP가 바뀌면 보고가 거부되고 디스코드로 알려 주며, 다시 인증해야 합니다. 같은 IP와 포트로 새로 인증하면 이전 등록은 폐기됩니다. 콘솔에 입력한 명령은 LocalAdmin 로그에 그대로 남으니 로그를 공유할 때 주의하세요.
 
@@ -56,13 +58,14 @@ SCP: Secret Laboratory 서버의 현재 맵 시드를 slmaps.com에 알려서, �
 |---|---|---|
 | `api_base_url` | `https://slmaps.com` | slmaps API 주소입니다. 안내가 없으면 그대로 두세요. |
 | `registration_token` | `""` | 운영진이 발급한 1회용 등록 토큰입니다. 등록에 성공하면 저절로 비워지고, 정상적인 `credential.yml`이 있으면 쓰지 않습니다. |
-| `claim_code` | `""` | `/server claim`으로 받은 인증 코드입니다. `registration_token`보다 먼저 쓰고, 인증되면 기존 자격을 바꾼 뒤 저절로 비워집니다. |
+| `claim_code` | `""` | `/server claim`으로 받은 인증 코드입니다. `registration_token`보다 먼저 쓰고, 인증되면 기존 자격을 바꾼 뒤 저절로 비워집니다. 형식이 틀리면 보내지 않고 그 값이 그대로 있는 동안 오류를 한 번만 남깁니다. |
 | `report_interval_seconds` | `60` | 현재 시드를 주기적으로 알리는 간격입니다. `0`이면 주기 보고를 끄고, 1에서 9까지는 10으로 올려서 씁니다. |
 | `send_round_id` | `false` | 맵이 생성될 때마다 새로 만드는 무작위 라운드 ID를 함께 보냅니다. |
 | `send_round_start_time` | `false` | 라운드가 시작된 UTC 시각을 함께 보냅니다. 시작 전이면 비어 있습니다. |
 | `send_elapsed_time` | `false` | 라운드 시작 후 지난 시간을 초 단위로 함께 보냅니다. 시작 전이면 비어 있습니다. |
 | `request_timeout_seconds` | `10` | HTTP 요청 제한 시간입니다. 3에서 60 사이로 잘라 씁니다. |
 | `debug` | `false` | 자세한 로그를 남깁니다. 토큰과 자격 값은 어떤 경우에도 남기지 않습니다. |
+| `check_for_updates` | `true` | 새 플러그인 버전이 나오면 콘솔에 경고를 한 번 남깁니다. `false`로 하면 이 경고만 꺼지고, 버전 확인과 최소 버전 적용은 그대로입니다. |
 
 ## 콘솔 명령
 
@@ -70,8 +73,21 @@ SCP: Secret Laboratory 서버의 현재 맵 시드를 slmaps.com에 알려서, �
 
 | 명령 | 하는 일 |
 |---|---|
-| `slmaps status` | 등록 상태, serverId, 진행 중인 인증, 현재 시드, `api_base_url`을 보여 줍니다. |
-| `slmaps claim <코드>` | `/server claim`으로 받은 코드로 인증합니다. 자격이 이미 있어도 보고를 계속하면서 뒤에서 인증하고, 인증되면 새 자격으로 바꿉니다. |
+| `slmaps help` | 명령 목록을 보여 줍니다. `slmaps`만 입력해도 같습니다. |
+| `slmaps status` | 버전 확인 결과, 등록 상태, serverId, 진행 중인 인증, 마지막 인증 결과, 현재 시드, 마지막 보고 결과, `api_base_url`을 보여 줍니다. |
+| `slmaps claim <코드>` | `/server claim`으로 받은 코드로 인증합니다. 형식이 틀린 값은 보내지 않고, 진행 중인 코드가 있으면 새 코드가 대신합니다. |
+| `slmaps cancel` | 진행 중인 인증을 멈추고, `config.yml`에 같은 코드가 있으면 비웁니다. 이미 나간 요청이 나중에 승인되면 받은 자격은 그대로 저장합니다. |
+| `slmaps report` | 현재 시드를 지금 바로 보고합니다. `report_interval_seconds`가 `0`이어도 보냅니다. |
+| `slmaps log [n]` | 최근 기록 n개를 서버 지역 시간과 함께 보여 줍니다. 기본 10개, 최대 50개이고 서버를 재시작하면 비워집니다. 토큰과 자격은 나오지 않고 코드는 앞 12자만 나옵니다. |
+| `slmaps version` | 설치된 버전, slmaps가 알려 준 최신 버전과 최소 버전, 내려받기 주소, 마지막 확인 결과, 다음 확인까지 남은 시간을 보여 주고 바로 다시 확인합니다. |
+
+## 업데이트 확인
+
+플러그인은 켜진 직후에 한 번, 그 뒤로는 12시간마다 slmaps에 최신 버전과 최소 버전을 묻습니다. slmaps가 답하지 않거나 답을 읽을 수 없으면 조용히 넘어가고 다음 확인 때 다시 묻습니다.
+
+새 버전이 나오면 콘솔에 경고가 한 번 나옵니다. 같은 버전으로는 다시 나오지 않고, `check_for_updates: false`면 경고를 남기지 않습니다.
+
+설치된 버전이 slmaps가 받는 최소 버전보다 낮으면 오류를 한 번 남기고 등록, 인증, 보고를 멈춥니다. 멈춘 동안 생긴 보고는 버리고, 진행 중이던 인증과 등록 토큰은 그대로 둡니다. 새 DLL로 바꾸고 서버를 재시작하면 풀리며, slmaps가 최소 버전을 낮추면 재시작 없이도 다음 확인에서 풀립니다.
 
 ## 보내는 데이터
 
@@ -91,8 +107,13 @@ SCP: Secret Laboratory 서버의 현재 맵 시드를 slmaps.com에 알려서, �
 
 | 콘솔에 나오는 말 | 뜻과 할 일 |
 |---|---|
-| `Not registered with slmaps: there is no credential.yml, claim_code is empty and registration_token is empty.` | 아직 등록하지 않았습니다. 위의 등록 절차를 따르세요. |
-| `claim_code is longer than 128 characters.` | 코드가 아닌 값이 들어 있거나 코드가 잘못 붙여졌습니다. 봇이 준 `slclm_` 코드만 넣고 `labapi reload configs`를 실행하세요. |
+| `Not registered with slmaps: ... claim_code is empty and registration_token is empty.` | 아직 등록하지 않았습니다. 위의 등록 절차를 따르세요. |
+| `Not registered with slmaps: ... claim_code is not a valid claim code ...` | `claim_code`에 형식이 틀린 값이 들어 있습니다. 봇이 준 `slclm_` 코드로 고치고 `labapi reload configs`를 실행하세요. |
+| `Not registered with slmaps: ... claim_code holds a code that was already rejected, used, replaced or cancelled ...` | 이미 끝난 코드라 다시 보내지 않습니다. `/server claim`으로 새 코드를 받으세요. |
+| `Claim code not sent. #19 is a claim request number, not a claim code.` | 요청 번호를 넣었습니다. 봇 메시지의 `slclm_` 코드를 넣으세요. |
+| `Claim code not sent. The claim code is wrapped in quotes or angle brackets.` | 따옴표나 꺾쇠를 빼고 코드만 넣으세요. |
+| `Claim code not sent. The claim code is too short.` 또는 `too long.` 또는 `contains a character that codes never have.` | 코드가 잘렸거나 다른 문자가 섞였습니다. 코드를 통째로 다시 복사하세요. |
+| `claim_code in ... was not sent.` | `config.yml`의 `claim_code` 형식이 틀립니다. 값을 고치고 `labapi reload configs`를 실행하세요. 값이 그대로인 동안에는 한 번만 나옵니다. |
 | `slmaps staff must review this claim manually (...)` | 요청 IP나 포트가 적은 주소와 달라 운영진 확인을 기다립니다. 서버를 켜 두면 플러그인이 알아서 다시 물어봅니다. |
 | `slmaps rejected the claim code (HTTP 401)` | 코드가 틀렸거나 만료됐거나 이미 쓰였습니다. `/server claim`으로 새 코드를 받으세요. |
 | `slmaps staff rejected this claim (HTTP 403)` | 운영진이 인증을 거절했습니다. 사유는 디스코드로 옵니다. |
@@ -100,7 +121,10 @@ SCP: Secret Laboratory 서버의 현재 맵 시드를 slmaps.com에 알려서, �
 | `Registration failed (...); retrying in Ns.` 또는 `Report ... failed (...); retrying in Ns.` | 네트워크 오류나 일시적인 장애입니다. 5초, 15초, 60초, 그 뒤 300초 간격으로 알아서 다시 시도합니다. |
 | `slmaps rejected the server credential (HTTP 401)` | 자격이 폐기됐거나 다른 인증으로 바뀌었거나 인증된 IP가 아닌 곳에서 보냈습니다. `/server claim`으로 다시 인증하세요. |
 | `api_base_url is not a valid http(s) URL.` | 주소를 고치고 `labapi reload configs`를 실행하세요. |
-| `The server answered with a redirect; check api_base_url` | 주소가 잘못돼 리디렉트가 왔습니다. 보통 `https://slmaps.com`이어야 합니다. |
+| `The server answered with a redirect; check api_base_url.` | 주소가 잘못돼 리디렉트가 왔습니다. 보통 `https://slmaps.com`이어야 합니다. |
+| `A newer SlmapsServerPlugin version is available: ...` | 새 버전이 나왔습니다. 안내된 주소에서 새 DLL을 받아 바꾸고 서버를 재시작하세요. |
+| `This plugin version (...) is below the minimum version slmaps accepts (...)` | slmaps가 이 버전을 더 받지 않아 등록, 인증, 보고가 멈췄습니다. 새 DLL로 바꾸고 서버를 재시작하세요. |
+| `slmaps accepts plugin ... again (...)` | 멈춤이 저절로 풀렸습니다. 할 일은 없습니다. |
 
 ## 빌드
 
@@ -126,6 +150,6 @@ Register: run `/server claim address:<ip>:<port>` in the slmaps Discord and ente
 
 Sent data: the map seed, the server port, the plugin, game and LabAPI versions, and the optional round id, round start time and elapsed time. No player data is ever sent.
 
-Console commands: `slmaps status`, `slmaps claim <code>`.
+Console commands: `slmaps help`, `status`, `claim <code>`, `cancel`, `report`, `log [n]`, `version`.
 
 Discord: https://discord.gg/AKWe9PvbGm

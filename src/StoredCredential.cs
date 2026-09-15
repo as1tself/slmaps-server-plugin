@@ -2,7 +2,7 @@ using System.ComponentModel;
 
 namespace SlmapsServerPlugin
 {
-    // slmaps keeps only a hash of the credential, so losing this file means registering the server again.
+    // slmaps keeps only a hash of the credential, so losing this file means claiming the server again.
     public sealed class StoredCredential
     {
         [Description("Server id assigned by slmaps.")]

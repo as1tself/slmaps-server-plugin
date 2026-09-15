@@ -15,28 +15,55 @@ namespace SlmapsServerPlugin
 
         public bool Execute(ArraySegment<string> arguments, ICommandSender sender, out string response)
         {
-            Reporter reporter = SlmapsPlugin.ActiveReporter;
-            if (reporter == null)
+            try
             {
-                response = "The slmaps plugin is not enabled.";
-                return false;
-            }
-            string[] args = new string[arguments.Count];
-            if (arguments.Array != null && arguments.Count > 0)
-            {
-                Array.Copy(arguments.Array, arguments.Offset, args, 0, arguments.Count);
-            }
-            string code;
-            switch (ConsoleCommandParser.Parse(args, out code))
-            {
-                case ConsoleCommandParser.Action.Claim:
-                    return reporter.StartClaim(code, out response);
-                case ConsoleCommandParser.Action.Status:
-                    response = reporter.DescribeStatus();
+                string[] args = new string[arguments.Count];
+                if (arguments.Array != null && arguments.Count > 0)
+                {
+                    Array.Copy(arguments.Array, arguments.Offset, args, 0, arguments.Count);
+                }
+                ConsoleCommandParser.Parsed command = ConsoleCommandParser.Parse(args);
+                if (command.Action == ConsoleCommandParser.Action.Help)
+                {
+                    response = ConsoleCommandParser.Help;
                     return true;
-                default:
-                    response = ConsoleCommandParser.Usage;
+                }
+                if (command.Action == ConsoleCommandParser.Action.Error)
+                {
+                    response = command.Message;
                     return false;
+                }
+                Reporter reporter = SlmapsPlugin.ActiveReporter;
+                if (reporter == null)
+                {
+                    response = "The slmaps plugin is not enabled.";
+                    return false;
+                }
+                switch (command.Action)
+                {
+                    case ConsoleCommandParser.Action.Status:
+                        response = reporter.DescribeStatus();
+                        return true;
+                    case ConsoleCommandParser.Action.Claim:
+                        return reporter.StartClaim(command.Code, out response);
+                    case ConsoleCommandParser.Action.Cancel:
+                        return reporter.CancelClaim(out response);
+                    case ConsoleCommandParser.Action.Report:
+                        return reporter.QueueReportNow(out response);
+                    case ConsoleCommandParser.Action.Log:
+                        response = reporter.DescribeEvents(command.Count);
+                        return true;
+                    case ConsoleCommandParser.Action.Version:
+                        return reporter.CheckVersionNow(out response);
+                    default:
+                        response = ConsoleCommandParser.Usage;
+                        return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                response = "slmaps command failed: " + ex.GetType().Name + ": " + ex.Message;
+                return false;
             }
         }
     }

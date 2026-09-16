@@ -727,7 +727,9 @@ namespace SlmapsServerPlugin
             _reportBackoff.Reset();
             _nextReportAt = 0;
             _periodicBaseline = _now();
-            if (_seed > 0 && !_queue.HasRoundEventFor(_seed))
+            // 1.2.2: a credential that arrives after RoundEnded (lobby before the next map) must not announce the finished
+            // seed — that opened a window for a dead seed and, with one window per server, delayed the next map's block.
+            if (_seed > 0 && !_roundEnded && !_queue.HasRoundEventFor(_seed))
             {
                 EnqueueRoundEvent(ReportEvents.RoundStart);
             }

@@ -25,6 +25,7 @@ namespace SlmapsServerPlugin.Tests
             Run("Reporter: register 401 waits for reload", TestRegisterRejected);
             Run("Reporter: stop ignores late results", TestStopIgnoresLateResult);
             Run("Reporter: claim_code verified replaces credential", TestClaimVerified);
+            Run("Reporter: credential after RoundEnded does not announce the finished seed", TestCredentialAfterRoundEnd);
             Run("Reporter: console claim waits for review then verifies", TestClaimReview);
             Run("Reporter: claim 401/403 stop", TestClaimRejected);
             Run("ClaimCodeFormat", TestClaimCodeFormat);
@@ -591,15 +592,20 @@ namespace SlmapsServerPlugin.Tests
             Pump(r);
             Equal(afterRevoke, transport.Requests.Count, "no reports after revocation");
 
-            // A new token plus a reload registers again and announces the current map.
+            // A new token plus a reload registers again. The round of seed 99 already ended (RoundEnded above), so the
+            // new credential does NOT announce it (1.2.2); the next map is announced normally.
             host.Cfg.RegistrationToken = "slreg_SECOND_TOKEN";
             transport.Script.Enqueue(() => Http(200, "{\"serverId\":\"srv-2\",\"credential\":\"slsrv_SECOND_CREDENTIAL\",\"issuedAt\":\"2026-09-15T09:00:00Z\"}"));
             r.NotifyConfigReloaded();
             Pump(r);
             Pump(r);
             Equal("Registered", r.StateName, "registered again after reload");
+            Request registered = transport.Requests[transport.Requests.Count - 1];
+            Check(registered.Url.EndsWith("/register", StringComparison.Ordinal), "nothing announced for the finished seed after re-registration");
+            r.OnMapGenerated(100);
+            Pump(r);
             Request announce = transport.Requests[transport.Requests.Count - 1];
-            Check(announce.Bearer == "slsrv_SECOND_CREDENTIAL" && announce.Json.StartsWith("{\"event\":\"round_start\",\"seed\":99,", StringComparison.Ordinal), "current seed announced with new credential");
+            Check(announce.Bearer == "slsrv_SECOND_CREDENTIAL" && announce.Json.StartsWith("{\"event\":\"round_start\",\"seed\":100,", StringComparison.Ordinal), "next map announced with new credential");
 
             foreach (string line in host.Logs)
             {
@@ -612,7 +618,7 @@ namespace SlmapsServerPlugin.Tests
             string events = r.DescribeEvents(ConsoleCommandParser.MaxLogCount);
             Check(events.Contains("Registered with slmaps (serverId srv-1)") && events.Contains("Registration failed (HTTP 503")
                 && events.Contains("Report rejected (HTTP 401)") && events.Contains("Configuration reloaded."), "event log records registration, report and reload results");
-            Check(r.DescribeStatus().Contains("last report: ") && r.DescribeStatus().Contains("round_start seed 99 accepted"), "status shows the last report result");
+            Check(r.DescribeStatus().Contains("last report: ") && r.DescribeStatus().Contains("round_start seed 100 accepted"), "status shows the last report result");
             Equal(10, transport.Requests[0].Timeout, "timeout passed to transport");
         }
 
@@ -692,6 +698,48 @@ namespace SlmapsServerPlugin.Tests
             CheckNoLeak(r.DescribeStatus().Split('\n'), claimSecrets, "slmaps status");
             Check(r.DescribeEvents(ConsoleCommandParser.MaxLogCount).Contains("Claim verified (serverId srv-claim, code slclm_SECRET...)"), "event log records the verified claim with a 12-char code");
             Check(r.DescribeStatus().Contains("last claim result: ") && r.DescribeStatus().Contains("verified (serverId srv-claim)"), "status shows the last claim result");
+        }
+
+        // 1.2.2: verified in the lobby after RoundEnded -> no round_start for the dead seed; the next map is announced normally.
+        private static void TestCredentialAfterRoundEnd()
+        {
+            string code = Code("AFTER_ROUND_END_1");
+            FakeHost host = new FakeHost();
+            FakeTransport transport = new FakeTransport();
+            double now = 0;
+            Reporter r = new Reporter(host, transport, () => now, () => DateTime.UtcNow);
+            r.Start();
+            r.OnMapGenerated(808);
+            r.OnRoundStarted();
+            r.OnRoundEnded();
+            Equal(0, r.PendingRoundEvents, "nothing queued while not registered");
+
+            string message;
+            transport.Script.Enqueue(() => Http(200, "{\"status\":\"verified\",\"serverId\":\"srv-late\",\"credential\":\"slsrv_LATE_CREDENTIAL\",\"issuedAt\":\"\"}"));
+            Check(r.StartClaim(code, out message), "console claim accepted");
+            Pump(r);
+            Equal("Registered", r.StateName, "claim verified");
+            Equal(0, r.PendingRoundEvents, "the finished seed is not announced");
+            now += 1000;
+            PumpAll(r);
+            Equal(1, transport.Count, "only the claim request was sent (no round_start, no periodic for the finished seed)");
+
+            r.OnMapGenerated(809);
+            Pump(r);
+            Equal(2, transport.Count, "the next map is announced");
+            Check(transport.Requests[1].Json.StartsWith("{\"event\":\"round_start\",\"seed\":809,", StringComparison.Ordinal), "round_start of the new seed");
+
+            // A credential arriving while the map is live (lobby before RoundEnded) still announces it.
+            FakeHost host2 = new FakeHost();
+            FakeTransport transport2 = new FakeTransport();
+            Reporter r2 = new Reporter(host2, transport2, () => now, () => DateTime.UtcNow);
+            r2.Start();
+            r2.OnMapGenerated(810);
+            transport2.Script.Enqueue(() => Http(200, "{\"status\":\"verified\",\"serverId\":\"srv-live\",\"credential\":\"slsrv_LIVE_CREDENTIAL\",\"issuedAt\":\"\"}"));
+            Check(r2.StartClaim(Code("LIVE_MAP_1"), out message), "console claim accepted (live map)");
+            Pump(r2);
+            Equal(2, transport2.Count, "live seed announced right after the claim");
+            Check(transport2.Requests[1].Json.StartsWith("{\"event\":\"round_start\",\"seed\":810,", StringComparison.Ordinal), "round_start of the live seed");
         }
 
         private static void TestClaimReview()

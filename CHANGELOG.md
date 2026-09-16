@@ -1,5 +1,10 @@
 # 변경 내역
 
+## 1.2.2
+
+- 라운드가 끝난 뒤 다음 맵이 만들어지기 전에 인증이 끝나면, 이미 끝난 라운드의 시드를 `round_start`로 보내지 않습니다. 이전에는 끝난 시드에 차단 창이 열려 다음 라운드 시드의 차단이 최대 5분 늦어질 수 있었습니다.
+- When the claim finishes after a round has ended and before the next map is generated, the finished seed is no longer reported as `round_start`. Previously that opened a block window for a finished seed and could delay the next round's block by up to 5 minutes.
+
 ## 1.2.1
 
 - 라운드가 강제 재시작(`rr`)돼 라운드 종료 이벤트 없이 끝나도 `round_end`를 보냅니다. 이전에는 이때 이전 시드의 차단이 최대 5분 동안 남아 새 라운드의 시드가 그동안 보였습니다.

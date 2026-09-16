@@ -432,6 +432,20 @@ namespace SlmapsServerPlugin
             EnqueueRoundEvent(ReportEvents.RoundEnd);
         }
 
+        /// <summary>
+        /// A round restart without RoundEnded (forced restart). Sends round_end for the current seed so the server
+        /// releases its block window at once; after a normal RoundEnded nothing is sent twice.
+        /// </summary>
+        public void OnRoundRestarted()
+        {
+            if (_roundEnded)
+            {
+                return;
+            }
+            _host.Debug("Round restarted without RoundEnded, reporting round_end.");
+            OnRoundEnded();
+        }
+
         public void Tick()
         {
             if (_state == State.Stopped)

@@ -59,6 +59,7 @@ namespace SlmapsServerPlugin
                 ServerEvents.MapGenerated += OnMapGenerated;
                 ServerEvents.RoundStarted += OnRoundStarted;
                 ServerEvents.RoundEnded += OnRoundEnded;
+                ServerEvents.RoundRestarted += OnRoundRestarted;
                 _subscribed = true;
 
                 _host.Info(PluginInfo.Name + " " + PluginInfo.Version + " enabled (port " + _host.Port + ").");
@@ -80,6 +81,7 @@ namespace SlmapsServerPlugin
                     ServerEvents.MapGenerated -= OnMapGenerated;
                     ServerEvents.RoundStarted -= OnRoundStarted;
                     ServerEvents.RoundEnded -= OnRoundEnded;
+                    ServerEvents.RoundRestarted -= OnRoundRestarted;
                     _subscribed = false;
                 }
             }
@@ -168,6 +170,24 @@ namespace SlmapsServerPlugin
             catch (Exception ex)
             {
                 Logger.Error(PluginInfo.LogPrefix + "MapGenerated handler failed: " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        // 1.2.1: a forced restart (console "rr") never raises RoundEnded, so the seed's block window stayed open for up
+        // to 5 minutes into the next round. Report it as round_end; a restart after a normal RoundEnded is ignored.
+        private void OnRoundRestarted()
+        {
+            try
+            {
+                Reporter reporter = _reporter;
+                if (reporter != null)
+                {
+                    reporter.OnRoundRestarted();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(PluginInfo.LogPrefix + "RoundRestarted handler failed: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 

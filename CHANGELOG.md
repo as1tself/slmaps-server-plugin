@@ -1,5 +1,10 @@
 # 변경 내역
 
+## 1.2.1
+
+- 라운드가 강제 재시작(`rr`)돼 라운드 종료 이벤트 없이 끝나도 `round_end`를 보냅니다. 이전에는 이때 이전 시드의 차단이 최대 5분 동안 남아 새 라운드의 시드가 그동안 보였습니다.
+- Forced round restarts (`rr`) now send `round_end` too, so the previous seed's block ends right away instead of lingering for up to 5 minutes.
+
 ## 1.2.0
 
 - 콘솔 명령 `slmaps help`, `cancel`, `report`, `log`, `version`을 추가했습니다.

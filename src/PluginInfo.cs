@@ -4,8 +4,8 @@ namespace SlmapsServerPlugin
     {
         public const string Name = "SlmapsServerPlugin";
         public const string Author = "slmaps";
-        public const string Version = "1.2.0";
-        public const string AssemblyVersion = "1.2.0.0";
+        public const string Version = "1.2.1";
+        public const string AssemblyVersion = "1.2.1.0";
         public const string ProductToken = "slmaps-server-plugin";
         public const string LogPrefix = "[slmaps] ";
 
